@@ -114,6 +114,11 @@ def scan_image_with_vlm(image):
             # 清洗與還原複雜電壓名稱
             r_val = r_val.replace(" ", "")
             r_volt = r_volt.replace(" ", "")
+
+            # 只保留電源軌本身的名稱(例如 +V3.3SB)，把後面接的網域/子系統字尾
+            # (例如 +V3.3SB_WWAN 裡的 _WWAN) 捨棄，避免污染顯示、也避免電壓解析誤判
+            volt_match = re.match(r'^([+\-]?[A-Z]*\d+(?:\.\d+)?[A-Z0-9]*)', r_volt_raw)
+            r_volt = volt_match.group(1) if volt_match else r_volt_raw.split('_')[0]
             
             if r_name:
                 #只組裝電阻行格式，不再將電壓另外加入 voltages_set 容器中
