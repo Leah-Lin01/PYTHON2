@@ -136,6 +136,35 @@ def scan_image_with_vlm(image):
         
     except Exception as e:
         return f"大模型視覺解析失敗。錯誤原因: {e}"
+
+
+# ==============================================================================
+#  背景輔助函式：計算前才把隱藏的分壓配對標記接回文字內容，畫面上完全不顯示
+# ==============================================================================
+def apply_hidden_divider_tags(user_text, divider_map):
+    if not divider_map:
+        return user_text
+
+    new_lines = []
+    for line in user_text.split('\n'):
+        stripped = line.strip()
+        if not stripped or "=" not in stripped:
+            new_lines.append(line)
+            continue
+
+        name_part, spec_part = stripped.split('=', 1)
+        name_key = name_part.strip().upper()
+
+        if name_key in divider_map:
+            spec_upper = spec_part.strip().upper()
+            # 如果使用者自己手動打過標記，就不要重複疊加
+            if not re.search(r'_(DIV\w*)_(TOP|BOT)$', spec_upper):
+                group, role = divider_map[name_key]
+                stripped = f"{name_part.strip()}={spec_part.strip()}_DIV{group}_{role}"
+
+        new_lines.append(stripped)
+
+    return "\n".join(new_lines)
     
 # ==============================================================================
 #  獨立計算公式程式 (從文字行內抽離各自電壓進行 Pact 計算)
@@ -168,8 +197,6 @@ def calculate_derating_metrics(user_text, derating_target=0.80):
 
         # ========================================================
         # 分壓配對標記擷取 
-        # 有標記的話，先取出群組代號與角色，再把標記從字串尾端拿掉，
-        # 讓後面的阻值/功率/電壓解析邏輯完全不受影響。
         # ========================================================
         divider_group = None
         divider_role = None
