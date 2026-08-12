@@ -167,7 +167,7 @@ def calculate_derating_metrics(user_text, derating_target=0.80):
         clean_spec = spec.upper().strip()
 
         # ========================================================
-        # 💡 分壓配對標記擷取 (格式範例: 10K_1/16W_3.3V_DIV1_TOP)
+        # 分壓配對標記擷取 
         # 有標記的話，先取出群組代號與角色，再把標記從字串尾端拿掉，
         # 讓後面的阻值/功率/電壓解析邏輯完全不受影響。
         # ========================================================
@@ -178,8 +178,10 @@ def calculate_derating_metrics(user_text, derating_target=0.80):
             divider_group = div_match.group(1)
             divider_role = div_match.group(2)
             clean_spec = clean_spec[:div_match.start()].strip()
-
+            
+        # ========================================================
         # 將複雜字串依底線切開，最尾端的一定是電壓相關資訊
+        # ========================================================
         parts = clean_spec.split('_')
         if len(parts) < 2:
             continue  # 格式不符則跳過
@@ -237,18 +239,16 @@ def calculate_derating_metrics(user_text, derating_target=0.80):
         elif 'M' in unit: val_num *= 1000000
 
         # ==============================================================================
-        #  0歐姆
+        # 0歐姆
         # ==============================================================================
+        # 先判斷這顆電阻是不是0歐姆跳線
         if val_num == 0 or "0 OHM" in clean_spec or "0OHM" in clean_spec or "NL/0" in clean_spec or "0R" in remaining_spec:
             val_num = 0.002   # 要求的 0.002 Ω，確保分母大於 0
             is_jumper = True
         else:
             is_jumper = False
 
-        # ========================================================
-        # 💡 若這顆電阻帶有分壓標記，先暫存起來，
-        # 等同一組的 TOP / BOT 兩顆都收集齊了，才一起算分壓
-        # ========================================================
+        # 再判斷這顆電阻有沒有分壓標記，如果有就暫存起來
         if divider_group and divider_role:
             divider_groups.setdefault(divider_group, {})[divider_role] = {
                 "name": name,
@@ -260,8 +260,8 @@ def calculate_derating_metrics(user_text, derating_target=0.80):
             continue
 
         if is_jumper:
-            # 導線跳線：使用 0.002Ω 算真實微小功耗，但最終前台應力與呈現歸 0 漂亮過關
-            p_act = (voltage_used ** 2) / val_num  # 這裡的分母現在是 0.002，百分之百安全！
+            # 跳線：使用0.002 ohm
+            p_act = (voltage_used ** 2) / val_num  # 這裡的分母現在是 0.002 ohm
             p_act_display = 0.0                    # 前台顯示功耗歸零
             stress_ratio = 0.0
             is_pass = True
@@ -286,7 +286,7 @@ def calculate_derating_metrics(user_text, derating_target=0.80):
         })
 
     # ==============================================================================
-    #  💡 分壓計算：把收集齊的 TOP/BOT 電阻對，用實際迴路電流重新計算 Pact/Pmax
+    # 分壓計算，用實際迴路電流重新計算 Pact/Pmax
     # ==============================================================================
     for group_name, roles in divider_groups.items():
         top = roles.get("TOP")
@@ -399,15 +399,13 @@ with col1:
             key="realtime_user_text"  # 加上固定 key，由 st.session_state 主導管理
         )
         st.caption(
-            "分壓電路格式：在兩顆串聯電阻尾端加上相同群組代號，"
-            "並分別標示 _TOP（接電源）/ _BOT（接地）。例如："
-            "`R1=10K_1/16W_3.3V_DIV1_TOP` 與 `R2=10K_1/16W_3.3V_DIV1_BOT`"
-        )
+            "分壓電路格式：在兩顆串聯電阻尾端分別標示 _TOP（接電源）/ _BOT（接地）"
+            )
 
 with col2:
     st.header("Step 3：Derating 分析")
     if uploaded_file and st.button("開始計算Derating判定", type="primary"):
-        with st.spinner("正在讀取行內專專規格並執行計算..."):
+        with st.spinner("正在讀取並執行計算..."):
             try:
                 # 從安全初始化後的狀態中提取即時文字
                 current_text = st.session_state.realtime_user_text
@@ -438,29 +436,28 @@ with col2:
                         vin = component.get('divider_vin', this_r_voltage)
                         vout = component.get('divider_vout', 0.0)
                         st.info(
-                            f"分壓群組： `{component.get('divider_group', '')}` ｜ {role_label}\n\n"
+                            f"分壓： {role_label}\n\n"
                             f"Vin： `{vin:.2f} V` ｜ Vout（分壓節點）： `{vout:.2f} V` ｜ "
-                            f"迴路電流： `{i_divider * 1000:.3f} mA`"
                         )
                     else:
                         st.info(f"工作電壓： `{this_r_voltage:.1f} V`")
 
-                    # 💡 提取前端即將用來顯示或可能引爆除法的變數
+                    # 💡 提取前端即將用來顯示
                     r_val = float(component.get('r_value', 0.0))
                     p_max = float(component.get('p_max', 0.0625))
                     p_act = float(component.get('p_act', 0.0))
 
                     formula_label = "I² × R / Pmax" if is_divider else "V² / R / Pmax"
 
-                    # 🚀 檢查是否為跳線，或者「分母是否不幸包含任何0」
+                    # 檢查是否為跳線，或者分母是否包含任何0
                     if component.get('is_jumper', False) or r_val <= 0 or p_max <= 0:
-                        # 🔌 只要發現任何一個分母是 0，或者標記為跳線，100% 封鎖原本有毒的算式！
+                        # 只要發現任何一個分母是 0，或者標記為跳線，100% 封鎖原本的算式！
                         st.markdown(f"* **阻值 (R)**： `0.0 Ω` (jump)")
                         st.markdown(f"* **量測工作功耗 (Pact)**： `0.000000 W` ")
                         st.markdown(f"* **額定最大功率 (PMAX)**： `{p_max if p_max > 0 else 0.0625:.4f} W` ")
                         
                         st.markdown(f"* **Pact/Pmax計算 ({formula_label})**：")
-                        # 📝 這裡全部用純文字印出，絕對不執行任何代數除法，除以零的錯誤在全宇宙都不可能發生！
+                        # 全部用純文字印出
                         if is_divider:
                             st.code(f"({i_divider * 1000:.3f}mA)² × 0.002Ω (0歐姆) = 0.0000")
                         else:
@@ -469,7 +466,7 @@ with col2:
                         st.success(f"🟢 **PASS (0歐姆跳線)**")
                     
                     else:
-                        # 🔒 只有在阻值大於0、且最大功率大於0的絕對安全狀態下，才放行跑正常電阻顯示
+                        # 只有在阻值大於0、且最大功率大於0的絕對安全狀態下，才放行跑正常電阻顯示
                         st.markdown(f"* **電阻值 (R)**： `{r_val:.1f} Ω` ")
                         st.markdown(f"* **量測工作功耗 (Pact)**： `{p_act:.6f} W` ")
                         st.markdown(f"* **額定最大功率 (Pmax)**： `{p_max:.4f} W` ")
@@ -493,6 +490,6 @@ with col2:
                     st.write("---")
                     
             except Exception as e:
-                # 🛠️ 萬一有其他我們沒想到的未知除法死角，把當機壓制住，改成印出貼心提示
+                #萬一有其他我們沒想到的未知除法死角，把當機壓制住，改成印出貼心提示
                 st.error(f"計算過程中有元件阻值或功率異常（含有 0 值），已被系統安全熔斷隔離。")
                 st.code(f"錯誤報告: {e}")
