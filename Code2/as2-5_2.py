@@ -117,13 +117,18 @@ def scan_image_with_vlm(image):
             
             if r_name:
                 #只組裝電阻行格式，不再將電壓另外加入 voltages_set 容器中
-                line = f"{r_name}={r_val}_{r_power}_{r_volt}"
+                display_line = f"{r_name}={r_val}_{r_power}_{r_volt}"
+                 if r_div_group and r_div_role in ("TOP", "BOT"):
+                    display_line += f"_{r_div_role}"
+
+                output_lines.append(display_line)
+
 
                 # 若AI判斷出這是分壓電路的一員，補上 _DIVx_TOP / _DIVx_BOT 標記
                 if r_div_group and r_div_role in ("TOP", "BOT"):
                     # 把節點名稱轉成只含英數字的安全字串，當作分壓群組代號
                     safe_group = re.sub(r'[^A-Za-z0-9]', '', r_div_group) or "1"
-                    line += f"_DIV{safe_group}_{r_div_role}"
+                    divider_map[r_name] = (safe_group, r_div_role)
 
                 output_lines.append(line)
             
@@ -139,7 +144,7 @@ def scan_image_with_vlm(image):
 
 
 # ==============================================================================
-#  背景輔助函式：計算前才把隱藏的分壓配對標記接回文字內容，畫面上完全不顯示
+#  計算前才把隱藏的分壓配對標記接回文字內容，畫面上完全不顯示
 # ==============================================================================
 def apply_hidden_divider_tags(user_text, divider_map):
     if not divider_map:
